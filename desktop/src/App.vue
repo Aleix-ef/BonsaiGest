@@ -1,19 +1,24 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, nextTick, onMounted, reactive, ref } from 'vue';
 import {
   CalendarDays,
   Camera,
+  Check,
   ChevronLeft,
   ChevronRight,
   Download,
   Droplets,
   FileUp,
   Leaf,
+  Pencil,
   Plus,
+  Printer,
+  RotateCcw,
   Scissors,
   ShieldCheck,
   Sprout,
   Trash2,
+  X,
 } from '@lucide/vue';
 import { fileToDataUrl, loadState, saveState } from './lib/storage';
 
@@ -22,6 +27,8 @@ const activeView = ref('dashboard');
 const activeDetailTab = ref('journal');
 const selectedTreeId = ref(null);
 const showTreeForm = ref(false);
+const editingTreeId = ref(null);
+const editingTaskId = ref(null);
 const ready = ref(false);
 const saving = ref(false);
 const message = ref('');
@@ -38,10 +45,12 @@ const eventForm = reactive({ date: today(), type: 'Poda', notes: '', imageFile: 
 const imageForm = reactive({ date: today(), description: '', imageFile: null });
 const taskForm = reactive({ date: today(), bonsaiId: '', title: '', description: '' });
 const treeTaskForm = reactive({ date: today(), title: '', description: '' });
+const collectionFilters = reactive({ search: '', species: '', location: '', style: '', size: '' });
 const treatmentForm = reactive({ date: today(), problem: '', product: '', result: '', notes: '' });
 
 const origins = ['Semilla', 'Esqueje', 'Acodo', 'Yamadori', 'Compra', 'Regalo'];
 const styles = ['Chokkan', 'Moyogi', 'Shakan', 'Cascada', 'Bosque', 'Otro'];
+const bonsaiSizes = ['Mame (hasta 10 cm)', 'Shohin (10-20 cm)', 'Kifu / Komono (20-35 cm)', 'Chuhin (35-60 cm)', 'Omono / Dai (60-100 cm)', 'Hachi-uye (más de 100 cm)'];
 const waterLevels = ['Baja', 'Media', 'Alta'];
 const locations = ['Interior', 'Exterior'];
 const workTypes = ['Poda', 'Pinzado', 'Alambrado', 'Trasplante', 'Abonado', 'Tratamiento', 'Riego especial', 'Diseño', 'Otro'];
@@ -50,6 +59,7 @@ const weekDays = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
 onMounted(async () => {
   const saved = await loadState();
   Object.assign(state, saved ?? demoState());
+  normalizeState();
   selectedTreeId.value = state.bonsais[0]?.id ?? null;
   ready.value = true;
 });
@@ -59,16 +69,35 @@ const totalEvents = computed(() => state.bonsais.reduce((total, tree) => total +
 const totalPhotos = computed(() => state.bonsais.reduce((total, tree) => total + tree.images.length, 0));
 
 const upcomingTasks = computed(() => [...state.tasks]
-  .filter((task) => task.date >= today())
+  .filter((task) => task.date >= today() && !task.completed)
   .sort((a, b) => a.date.localeCompare(b.date))
   .slice(0, 6));
+
+const filteredBonsais = computed(() => {
+  const search = collectionFilters.search.trim().toLowerCase();
+
+  return state.bonsais.filter((tree) => {
+    const matchesSearch = !search
+      || tree.name.toLowerCase().includes(search)
+      || tree.species.toLowerCase().includes(search)
+      || (tree.description ?? '').toLowerCase().includes(search);
+    const matchesSpecies = !collectionFilters.species || tree.species === collectionFilters.species;
+    const matchesLocation = !collectionFilters.location || tree.location === collectionFilters.location;
+    const matchesStyle = !collectionFilters.style || tree.style === collectionFilters.style;
+    const matchesSize = !collectionFilters.size || tree.size === collectionFilters.size;
+
+    return matchesSearch && matchesSpecies && matchesLocation && matchesStyle && matchesSize;
+  });
+});
+
+const collectionSpecies = computed(() => [...new Set(state.bonsais.map((tree) => tree.species).filter(Boolean))].sort());
 
 const treeTasks = computed(() => {
   if (!selectedTree.value) return [];
 
   return state.tasks
     .filter((task) => task.bonsaiId === selectedTree.value.id)
-    .sort((a, b) => a.date.localeCompare(b.date));
+    .sort((a, b) => a.completed - b.completed || a.date.localeCompare(b.date));
 });
 
 const tasksByDate = computed(() => state.tasks.reduce((carry, task) => {
@@ -148,6 +177,21 @@ function asDate(value) {
   return new Date(`${value}T00:00:00`);
 }
 
+function addDays(value, days) {
+  const date = asDate(value);
+  date.setDate(date.getDate() + days);
+
+  return isoDate(date);
+}
+
+function addMonths(value, months) {
+  const date = asDate(value);
+  date.setMonth(date.getMonth() + months);
+
+  return isoDate(date);
+}
+
+
 function formatDate(value) {
   return new Intl.DateTimeFormat('es-ES', { day: 'numeric', month: 'short', year: 'numeric' }).format(asDate(value));
 }
@@ -164,6 +208,15 @@ function treeImage(tree) {
   return tree?.mainImage || heroImage;
 }
 
+function clearCollectionFilters() {
+  resetObject(collectionFilters, { search: '', species: '', location: '', style: '', size: '' });
+}
+
+function normalizeState() {
+  state.bonsais = (state.bonsais ?? []).map((tree) => ({ size: bonsaiSizes[1], ...tree }));
+  state.tasks = (state.tasks ?? []).map((task) => ({ completed: false, ...task }));
+}
+
 function emptyTree() {
   return {
     name: '',
@@ -172,6 +225,7 @@ function emptyTree() {
     acquiredDate: '',
     origin: 'Compra',
     style: 'Moyogi',
+    size: 'Shohin (10-20 cm)',
     waterLevel: 'Media',
     location: 'Exterior',
     substrate: '',
@@ -194,6 +248,7 @@ function demoState() {
         acquiredDate: '2021-03-12',
         origin: 'Compra',
         style: 'Moyogi',
+        size: 'Chuhin (35-60 cm)',
         waterLevel: 'Media',
         location: 'Exterior',
         substrate: 'Akadama, kiryuzuna y pomice',
@@ -214,8 +269,8 @@ function demoState() {
       },
     ],
     tasks: [
-      { id: uid(), bonsaiId, date: '2026-07-18', title: 'Revisar alambre', description: 'Comprobar marcas en la primera rama.' },
-      { id: uid(), bonsaiId: '', date: '2026-07-22', title: 'Preparar abono', description: 'Revisar existencias para final de verano.' },
+      { id: uid(), bonsaiId, date: '2026-07-18', title: 'Revisar alambre', description: 'Comprobar marcas en la primera rama.', completed: false },
+      { id: uid(), bonsaiId: '', date: '2026-07-22', title: 'Preparar abono', description: 'Revisar existencias para final de verano.', completed: false },
     ],
   };
 }
@@ -242,12 +297,78 @@ function openTree(tree) {
 function openCollectionForm() {
   activeView.value = 'collection';
   showTreeForm.value = true;
+  editingTreeId.value = null;
+  resetObject(treeForm, emptyTree());
 }
 
-async function addTree() {
+function cancelTreeForm() {
+  showTreeForm.value = false;
+  editingTreeId.value = null;
+  resetObject(treeForm, emptyTree());
+}
+
+function editTree(tree) {
+  editingTreeId.value = tree.id;
+  resetObject(treeForm, {
+    name: tree.name,
+    species: tree.species,
+    age: tree.age,
+    acquiredDate: tree.acquiredDate,
+    origin: tree.origin,
+    style: tree.style,
+    size: tree.size ?? bonsaiSizes[1],
+    waterLevel: tree.waterLevel,
+    location: tree.location,
+    substrate: tree.substrate,
+    fertilizer: tree.fertilizer,
+    description: tree.description,
+    imageFile: null,
+  });
+  activeView.value = 'collection';
+  showTreeForm.value = true;
+}
+
+async function saveTree() {
   saving.value = true;
   try {
-    const mainImage = treeForm.imageFile ? await fileToDataUrl(treeForm.imageFile) : heroImage;
+    const existingTree = state.bonsais.find((tree) => tree.id === editingTreeId.value);
+    const mainImage = treeForm.imageFile ? await fileToDataUrl(treeForm.imageFile) : (existingTree?.mainImage ?? heroImage);
+
+    if (existingTree) {
+      Object.assign(existingTree, {
+        name: treeForm.name,
+        species: treeForm.species,
+        age: treeForm.age,
+        acquiredDate: treeForm.acquiredDate,
+        origin: treeForm.origin,
+        style: treeForm.style,
+        size: treeForm.size,
+        waterLevel: treeForm.waterLevel,
+        location: treeForm.location,
+        substrate: treeForm.substrate,
+        fertilizer: treeForm.fertilizer,
+        description: treeForm.description,
+        mainImage,
+      });
+
+      if (treeForm.imageFile) {
+        existingTree.images.push({
+          id: uid(),
+          date: today(),
+          image: mainImage,
+          description: 'Foto principal actualizada',
+        });
+      }
+
+      selectedTreeId.value = existingTree.id;
+      resetObject(treeForm, emptyTree());
+      editingTreeId.value = null;
+      showTreeForm.value = false;
+      await persist('Bonsái actualizado');
+      activeView.value = 'detail';
+      return;
+    }
+
     const tree = {
       id: uid(),
       name: treeForm.name,
@@ -256,6 +377,7 @@ async function addTree() {
       acquiredDate: treeForm.acquiredDate,
       origin: treeForm.origin,
       style: treeForm.style,
+      size: treeForm.size,
       waterLevel: treeForm.waterLevel,
       location: treeForm.location,
       substrate: treeForm.substrate,
@@ -276,6 +398,21 @@ async function addTree() {
   } finally {
     saving.value = false;
   }
+}
+
+async function deleteTree(tree) {
+  if (!window.confirm(`¿Eliminar "${tree.name}" y todo su historial? Esta acción no se puede deshacer.`)) return;
+
+  state.bonsais = state.bonsais.filter((item) => item.id !== tree.id);
+  state.tasks = state.tasks.filter((task) => task.bonsaiId !== tree.id);
+
+  if (selectedTreeId.value === tree.id) {
+    selectedTreeId.value = state.bonsais[0]?.id ?? null;
+    activeView.value = state.bonsais.length ? 'collection' : 'dashboard';
+  }
+
+  cancelTreeForm();
+  await persist('Bonsái eliminado');
 }
 
 async function addEvent() {
@@ -308,6 +445,13 @@ async function addEvent() {
   }
 }
 
+async function deleteEvent(eventId) {
+  if (!selectedTree.value || !window.confirm('¿Eliminar esta entrada del diario?')) return;
+
+  selectedTree.value.events = selectedTree.value.events.filter((event) => event.id !== eventId);
+  await persist('Entrada eliminada');
+}
+
 async function addImage() {
   if (!selectedTree.value || !imageForm.imageFile) return;
 
@@ -328,11 +472,44 @@ async function addImage() {
   }
 }
 
+async function deleteImage(imageId) {
+  if (!selectedTree.value || !window.confirm('¿Eliminar esta foto de evolución?')) return;
+
+  const imageToDelete = selectedTree.value.images.find((image) => image.id === imageId);
+  selectedTree.value.images = selectedTree.value.images.filter((image) => image.id !== imageId);
+
+  if (imageToDelete?.image === selectedTree.value.mainImage) {
+    const latestImage = [...selectedTree.value.images].sort((a, b) => b.date.localeCompare(a.date))[0];
+    selectedTree.value.mainImage = latestImage?.image ?? heroImage;
+  }
+
+  await persist('Foto eliminada');
+}
+
 async function addTask(source = 'calendar') {
   const form = source === 'tree' ? treeTaskForm : taskForm;
   const bonsaiId = source === 'tree' ? selectedTree.value?.id : form.bonsaiId;
 
   if (!form.title) return;
+
+  if (editingTaskId.value) {
+    const task = state.tasks.find((item) => item.id === editingTaskId.value);
+
+    if (task) {
+      Object.assign(task, {
+        bonsaiId: bonsaiId || '',
+        date: form.date,
+        title: form.title,
+        description: form.description,
+      });
+    }
+
+    editingTaskId.value = null;
+    resetObject(taskForm, { date: selectedCalendarDate.value, bonsaiId: '', title: '', description: '' });
+    resetObject(treeTaskForm, { date: today(), title: '', description: '' });
+    await persist('Tarea actualizada');
+    return;
+  }
 
   state.tasks.push({
     id: uid(),
@@ -340,6 +517,7 @@ async function addTask(source = 'calendar') {
     date: form.date,
     title: form.title,
     description: form.description,
+    completed: false,
   });
 
   if (source === 'tree') {
@@ -351,8 +529,65 @@ async function addTask(source = 'calendar') {
   await persist('Tarea añadida');
 }
 
+function editTask(task, source = 'calendar') {
+  editingTaskId.value = task.id;
+
+  if (source === 'tree') {
+    resetObject(treeTaskForm, {
+      date: task.date,
+      title: task.title,
+      description: task.description,
+    });
+    activeDetailTab.value = 'agenda';
+    return;
+  }
+
+  resetObject(taskForm, {
+    date: task.date,
+    bonsaiId: task.bonsaiId || '',
+    title: task.title,
+    description: task.description,
+  });
+  activeView.value = 'calendar';
+  selectCalendarDay(task.date);
+}
+
+function cancelTaskEdit(source = 'calendar') {
+  editingTaskId.value = null;
+
+  if (source === 'tree') {
+    resetObject(treeTaskForm, { date: today(), title: '', description: '' });
+    return;
+  }
+
+  resetObject(taskForm, { date: selectedCalendarDate.value, bonsaiId: '', title: '', description: '' });
+}
+
+async function toggleTaskDone(task) {
+  task.completed = !task.completed;
+  await persist(task.completed ? 'Tarea marcada como hecha' : 'Tarea marcada como pendiente');
+}
+
+async function repeatTask(task, mode) {
+  const date = mode === 'month' ? addMonths(task.date, 1) : addDays(task.date, 15);
+
+  state.tasks.push({
+    id: uid(),
+    bonsaiId: task.bonsaiId || '',
+    date,
+    title: task.title,
+    description: task.description,
+    completed: false,
+  });
+
+  await persist(mode === 'month' ? 'Tarea repetida en 1 mes' : 'Tarea repetida en 15 días');
+}
+
 async function deleteTask(id) {
+  if (!window.confirm('¿Eliminar esta tarea?')) return;
+
   state.tasks = state.tasks.filter((task) => task.id !== id);
+  if (editingTaskId.value === id) editingTaskId.value = null;
   await persist('Tarea eliminada');
 }
 
@@ -366,6 +601,13 @@ async function addTreatment() {
 
   resetObject(treatmentForm, { date: today(), problem: '', product: '', result: '', notes: '' });
   await persist('Tratamiento registrado');
+}
+
+async function deleteTreatment(treatmentId) {
+  if (!selectedTree.value || !window.confirm('¿Eliminar este tratamiento?')) return;
+
+  selectedTree.value.treatments = selectedTree.value.treatments.filter((item) => item.id !== treatmentId);
+  await persist('Tratamiento eliminado');
 }
 
 function selectCalendarDay(date) {
@@ -400,8 +642,14 @@ async function importBackup(file) {
   const imported = JSON.parse(text);
   state.bonsais = imported.bonsais ?? [];
   state.tasks = imported.tasks ?? [];
+  normalizeState();
   selectedTreeId.value = state.bonsais[0]?.id ?? null;
   await persist('Copia importada');
+}
+
+async function printTreeDocument() {
+  await nextTick();
+  window.print();
 }
 </script>
 
@@ -442,6 +690,7 @@ async function importBackup(file) {
             <div class="hero-actions">
               <button class="primary-button" @click="openCollectionForm"><Plus :size="18" /> Añadir bonsái</button>
               <button class="secondary-button" @click="activeView = 'calendar'"><CalendarDays :size="18" /> Ver agenda</button>
+              <button class="secondary-button" @click="exportBackup"><Download :size="18" /> Guardar copia</button>
             </div>
           </div>
           <img :src="heroImage" alt="Bonsái" />
@@ -464,7 +713,7 @@ async function importBackup(file) {
               <button v-for="tree in state.bonsais.slice(0, 4)" :key="tree.id" class="tree-card" @click="openTree(tree)">
                 <img :src="treeImage(tree)" :alt="tree.name" />
                 <span>{{ tree.name }}</span>
-                <small>{{ tree.species }}</small>
+                <small>{{ tree.species }} · {{ tree.size }}</small>
               </button>
             </div>
           </section>
@@ -488,11 +737,20 @@ async function importBackup(file) {
             <h1>Mis bonsáis</h1>
           </div>
           <button v-if="!showTreeForm" class="primary-button" @click="showTreeForm = true"><Plus :size="18" /> Añadir bonsái</button>
-          <button v-else class="secondary-button" @click="showTreeForm = false">Ver colección</button>
+          <button v-else class="secondary-button" @click="cancelTreeForm"><X :size="18" /> Ver colección</button>
         </div>
 
-        <form v-if="showTreeForm" class="form-panel" @submit.prevent="addTree">
-          <h2>Nuevo bonsái</h2>
+        <div v-if="!showTreeForm && state.bonsais.length" class="collection-filters">
+          <label>Buscar<input v-model="collectionFilters.search" placeholder="Nombre, especie o notas" /></label>
+          <label>Especie<select v-model="collectionFilters.species"><option value="">Todas</option><option v-for="species in collectionSpecies" :key="species" :value="species">{{ species }}</option></select></label>
+          <label>Ubicación<select v-model="collectionFilters.location"><option value="">Todas</option><option v-for="item in locations" :key="item">{{ item }}</option></select></label>
+          <label>Estilo<select v-model="collectionFilters.style"><option value="">Todos</option><option v-for="item in styles" :key="item">{{ item }}</option></select></label>
+          <label>Tamaño<select v-model="collectionFilters.size"><option value="">Todos</option><option v-for="item in bonsaiSizes" :key="item">{{ item }}</option></select></label>
+          <button class="secondary-button" type="button" @click="clearCollectionFilters"><X :size="18" /> Limpiar</button>
+        </div>
+
+        <form v-if="showTreeForm" class="form-panel" @submit.prevent="saveTree">
+          <h2>{{ editingTreeId ? 'Editar bonsái' : 'Nuevo bonsái' }}</h2>
           <div class="form-grid">
             <label>Nombre<input v-model="treeForm.name" required /></label>
             <label>Especie<input v-model="treeForm.species" required /></label>
@@ -500,6 +758,7 @@ async function importBackup(file) {
             <label>Fecha de adquisición<input v-model="treeForm.acquiredDate" type="date" /></label>
             <label>Origen<select v-model="treeForm.origin"><option v-for="item in origins" :key="item">{{ item }}</option></select></label>
             <label>Estilo<select v-model="treeForm.style"><option v-for="item in styles" :key="item">{{ item }}</option></select></label>
+            <label>Tamaño<select v-model="treeForm.size"><option v-for="item in bonsaiSizes" :key="item">{{ item }}</option></select></label>
             <label>Necesidad de agua<select v-model="treeForm.waterLevel"><option v-for="item in waterLevels" :key="item">{{ item }}</option></select></label>
             <label>Ubicación<select v-model="treeForm.location"><option v-for="item in locations" :key="item">{{ item }}</option></select></label>
             <label>Sustrato<input v-model="treeForm.substrate" /></label>
@@ -507,15 +766,24 @@ async function importBackup(file) {
             <label class="wide">Foto principal<input type="file" accept="image/*" @change="treeForm.imageFile = $event.target.files[0]" /></label>
             <label class="wide">Historia<textarea v-model="treeForm.description" rows="4" /></label>
           </div>
-          <button class="primary-button" :disabled="saving"><Plus :size="18" /> Guardar árbol</button>
+          <div class="form-actions">
+            <button class="primary-button" :disabled="saving"><Plus :size="18" /> {{ editingTreeId ? 'Guardar cambios' : 'Guardar árbol' }}</button>
+            <button class="secondary-button" type="button" @click="cancelTreeForm"><X :size="18" /> Cancelar</button>
+          </div>
         </form>
 
-        <div v-if="state.bonsais.length" class="tree-grid large">
-          <button v-for="tree in state.bonsais" :key="tree.id" class="tree-card" @click="openTree(tree)">
+        <div v-if="filteredBonsais.length" class="tree-grid large">
+          <button v-for="tree in filteredBonsais" :key="tree.id" class="tree-card" @click="openTree(tree)">
             <img :src="treeImage(tree)" :alt="tree.name" />
             <span>{{ tree.name }}</span>
-            <small>{{ tree.species }} · {{ tree.style }}</small>
+            <small>{{ tree.species }} · {{ tree.size }}</small>
           </button>
+        </div>
+        <div v-else-if="state.bonsais.length" class="empty-collection">
+          <Leaf :size="34" />
+          <h2>No hay bonsáis con esos filtros</h2>
+          <p>Prueba a limpiar la búsqueda o cambiar los filtros.</p>
+          <button class="secondary-button" @click="clearCollectionFilters"><X :size="18" /> Limpiar filtros</button>
         </div>
         <div v-else class="empty-collection">
           <Leaf :size="34" />
@@ -558,14 +826,19 @@ async function importBackup(file) {
             <p class="eyebrow">Día seleccionado</p>
             <h2>{{ formatDate(selectedCalendarDate) }}</h2>
 
-            <article v-for="task in selectedDateTasks" :key="task.id" class="task-row removable">
-              <CalendarDays :size="17" />
+            <article v-for="task in selectedDateTasks" :key="task.id" class="task-row removable" :class="{ done: task.completed }">
+              <button class="icon-button" :title="task.completed ? 'Marcar pendiente' : 'Marcar hecha'" @click="toggleTaskDone(task)"><Check :size="16" /></button>
               <div>
                 <strong>{{ task.title }}</strong>
-                <span>{{ treeName(task.bonsaiId) }}</span>
+                <span>{{ treeName(task.bonsaiId) }} · {{ task.completed ? 'Hecha' : 'Pendiente' }}</span>
                 <small v-if="task.description">{{ task.description }}</small>
               </div>
-              <button class="icon-button" @click="deleteTask(task.id)"><Trash2 :size="16" /></button>
+              <div class="task-actions">
+                <button class="icon-button" title="Editar tarea" @click="editTask(task)"><Pencil :size="16" /></button>
+                <button class="icon-button" title="Repetir en 15 días" @click="repeatTask(task, '15')"><RotateCcw :size="16" /></button>
+                <button class="secondary-button tiny" type="button" @click="repeatTask(task, 'month')">1 mes</button>
+                <button class="icon-button danger-icon" title="Eliminar tarea" @click="deleteTask(task.id)"><Trash2 :size="16" /></button>
+              </div>
             </article>
             <p v-if="!selectedDateTasks.length" class="empty-note">No hay tareas para este día.</p>
 
@@ -574,14 +847,22 @@ async function importBackup(file) {
               <label>Bonsái<select v-model="taskForm.bonsaiId"><option value="">General</option><option v-for="tree in state.bonsais" :key="tree.id" :value="tree.id">{{ tree.name }}</option></select></label>
               <label>Tarea<input v-model="taskForm.title" required /></label>
               <label>Descripción<textarea v-model="taskForm.description" rows="3" /></label>
-              <button class="primary-button"><Plus :size="18" /> Añadir tarea</button>
+              <div class="form-actions">
+                <button class="primary-button"><Plus :size="18" /> {{ editingTaskId ? 'Guardar tarea' : 'Añadir tarea' }}</button>
+                <button v-if="editingTaskId" class="secondary-button" type="button" @click="cancelTaskEdit()"><X :size="18" /> Cancelar</button>
+              </div>
             </form>
           </aside>
         </div>
       </section>
 
       <section v-else-if="activeView === 'detail' && selectedTree" class="view-stack">
-        <button class="secondary-button compact" @click="activeView = 'collection'">Volver</button>
+        <div class="detail-actions">
+          <button class="secondary-button compact" @click="activeView = 'collection'">Volver</button>
+          <button class="secondary-button compact" @click="editTree(selectedTree)"><Pencil :size="16" /> Editar bonsái</button>
+          <button class="secondary-button compact" @click="printTreeDocument"><Printer :size="16" /> Generar documento</button>
+          <button class="danger-button compact" @click="deleteTree(selectedTree)"><Trash2 :size="16" /> Borrar bonsái</button>
+        </div>
 
         <div class="detail-hero">
           <img :src="treeImage(selectedTree)" :alt="selectedTree.name" />
@@ -590,9 +871,9 @@ async function importBackup(file) {
             <h1>{{ selectedTree.name }}</h1>
             <p>{{ selectedTree.description }}</p>
             <div class="facts">
-              <article><span>Edad</span><strong>{{ selectedTree.age || 'Sin dato' }} años</strong></article>
+              <article><span>Edad</span><strong>{{ selectedTree.age ? `${selectedTree.age} años` : 'Sin dato' }}</strong></article>
+              <article><span>Tamaño</span><strong>{{ selectedTree.size }}</strong></article>
               <article><span>Estilo</span><strong>{{ selectedTree.style }}</strong></article>
-              <article><span>Origen</span><strong>{{ selectedTree.origin }}</strong></article>
             </div>
           </div>
         </div>
@@ -624,6 +905,7 @@ async function importBackup(file) {
                   <h3>{{ event.type }}</h3>
                   <p>{{ event.notes }}</p>
                 </div>
+                <button class="icon-button danger-icon" title="Eliminar entrada" @click="deleteEvent(event.id)"><Trash2 :size="16" /></button>
               </article>
             </div>
           </section>
@@ -639,7 +921,10 @@ async function importBackup(file) {
           <div class="gallery-grid">
             <figure v-for="image in selectedTree.images" :key="image.id">
               <img :src="image.image" :alt="image.description" />
-              <figcaption>{{ formatDate(image.date) }} · {{ image.description || 'Evolución' }}</figcaption>
+              <figcaption>
+                <span>{{ formatDate(image.date) }} · {{ image.description || 'Evolución' }}</span>
+                <button class="icon-button danger-icon" title="Eliminar foto" @click="deleteImage(image.id)"><Trash2 :size="16" /></button>
+              </figcaption>
             </figure>
           </div>
         </div>
@@ -650,18 +935,26 @@ async function importBackup(file) {
             <label>Fecha<input v-model="treeTaskForm.date" type="date" required /></label>
             <label>Tarea<input v-model="treeTaskForm.title" required /></label>
             <label>Descripción<textarea v-model="treeTaskForm.description" rows="4" /></label>
-            <button class="primary-button"><CalendarDays :size="18" /> Añadir a agenda</button>
+            <div class="form-actions">
+              <button class="primary-button"><CalendarDays :size="18" /> {{ editingTaskId ? 'Guardar tarea' : 'Añadir a agenda' }}</button>
+              <button v-if="editingTaskId" class="secondary-button" type="button" @click="cancelTaskEdit('tree')"><X :size="18" /> Cancelar</button>
+            </div>
           </form>
           <section class="panel">
             <h2>Tareas previstas</h2>
-            <article v-for="task in treeTasks" :key="task.id" class="task-row removable">
-              <CalendarDays :size="17" />
+            <article v-for="task in treeTasks" :key="task.id" class="task-row removable" :class="{ done: task.completed }">
+              <button class="icon-button" :title="task.completed ? 'Marcar pendiente' : 'Marcar hecha'" @click="toggleTaskDone(task)"><Check :size="16" /></button>
               <div>
                 <strong>{{ task.title }}</strong>
-                <span>{{ formatDate(task.date) }}</span>
+                <span>{{ formatDate(task.date) }} · {{ task.completed ? 'Hecha' : 'Pendiente' }}</span>
                 <small v-if="task.description">{{ task.description }}</small>
               </div>
-              <button class="icon-button" @click="deleteTask(task.id)"><Trash2 :size="16" /></button>
+              <div class="task-actions">
+                <button class="icon-button" title="Editar tarea" @click="editTask(task, 'tree')"><Pencil :size="16" /></button>
+                <button class="icon-button" title="Repetir en 15 días" @click="repeatTask(task, '15')"><RotateCcw :size="16" /></button>
+                <button class="secondary-button tiny" type="button" @click="repeatTask(task, 'month')">1 mes</button>
+                <button class="icon-button danger-icon" title="Eliminar tarea" @click="deleteTask(task.id)"><Trash2 :size="16" /></button>
+              </div>
             </article>
             <p v-if="!treeTasks.length" class="empty-note">No hay tareas para este árbol.</p>
           </section>
@@ -669,6 +962,7 @@ async function importBackup(file) {
 
         <div v-else-if="activeDetailTab === 'cultivation'" class="facts large">
           <article><Droplets /><span>Agua</span><strong>{{ selectedTree.waterLevel }}</strong></article>
+          <article><Leaf /><span>Tamaño</span><strong>{{ selectedTree.size }}</strong></article>
           <article><Leaf /><span>Ubicación</span><strong>{{ selectedTree.location }}</strong></article>
           <article><Sprout /><span>Sustrato</span><strong>{{ selectedTree.substrate || 'Sin dato' }}</strong></article>
           <article><Leaf /><span>Abono</span><strong>{{ selectedTree.fertilizer || 'Sin dato' }}</strong></article>
@@ -686,14 +980,57 @@ async function importBackup(file) {
           </form>
           <section class="panel">
             <article v-for="item in selectedTree.treatments" :key="item.id" class="treatment-row">
-              <span>{{ formatDate(item.date) }}</span>
-              <h3>{{ item.problem }}</h3>
-              <p>{{ item.product }} · {{ item.result }}</p>
-              <p>{{ item.notes }}</p>
+              <div>
+                <span>{{ formatDate(item.date) }}</span>
+                <h3>{{ item.problem }}</h3>
+                <p>{{ item.product }} · {{ item.result }}</p>
+                <p>{{ item.notes }}</p>
+              </div>
+              <button class="icon-button danger-icon" title="Eliminar tratamiento" @click="deleteTreatment(item.id)"><Trash2 :size="16" /></button>
             </article>
           </section>
         </div>
       </section>
     </main>
   </div>
+
+  <section v-if="selectedTree" class="print-document">
+    <header>
+      <p>BonsaiGest</p>
+      <h1>{{ selectedTree.name }}</h1>
+      <span>{{ selectedTree.species }}</span>
+    </header>
+    <img :src="treeImage(selectedTree)" :alt="selectedTree.name" />
+    <section class="print-grid">
+      <article><strong>Edad</strong><span>{{ selectedTree.age ? `${selectedTree.age} años` : 'Sin dato' }}</span></article>
+      <article><strong>Tamaño</strong><span>{{ selectedTree.size }}</span></article>
+      <article><strong>Estilo</strong><span>{{ selectedTree.style }}</span></article>
+      <article><strong>Origen</strong><span>{{ selectedTree.origin }}</span></article>
+      <article><strong>Adquisición</strong><span>{{ selectedTree.acquiredDate ? formatDate(selectedTree.acquiredDate) : 'Sin dato' }}</span></article>
+      <article><strong>Agua</strong><span>{{ selectedTree.waterLevel }}</span></article>
+      <article><strong>Ubicación</strong><span>{{ selectedTree.location }}</span></article>
+      <article><strong>Sustrato</strong><span>{{ selectedTree.substrate || 'Sin dato' }}</span></article>
+      <article><strong>Abono</strong><span>{{ selectedTree.fertilizer || 'Sin dato' }}</span></article>
+    </section>
+    <section>
+      <h2>Historia</h2>
+      <p>{{ selectedTree.description || 'Sin historia registrada.' }}</p>
+    </section>
+    <section>
+      <h2>Próximas tareas</h2>
+      <p v-for="task in treeTasks.slice(0, 8)" :key="task.id">{{ formatDate(task.date) }} · {{ task.title }} · {{ task.completed ? 'Hecha' : 'Pendiente' }}</p>
+      <p v-if="!treeTasks.length">Sin tareas previstas.</p>
+    </section>
+    <section>
+      <h2>Últimos trabajos</h2>
+      <p v-for="event in selectedTree.events.slice(0, 8)" :key="event.id">{{ formatDate(event.date) }} · {{ event.type }} · {{ event.notes }}</p>
+      <p v-if="!selectedTree.events.length">Sin trabajos registrados.</p>
+    </section>
+    <section>
+      <h2>Tratamientos</h2>
+      <p v-for="item in selectedTree.treatments.slice(0, 6)" :key="item.id">{{ formatDate(item.date) }} · {{ item.problem }} · {{ item.result || 'Sin resultado' }}</p>
+      <p v-if="!selectedTree.treatments.length">Sin tratamientos registrados.</p>
+    </section>
+  </section>
+
 </template>
