@@ -1,0 +1,40 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    /**
+     * Run the migrations.
+     */
+    public function up(): void
+    {
+        Schema::create('bonsais', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('user_id')->constrained()->cascadeOnDelete();
+            $table->string('name');
+            $table->string('species');
+            $table->unsignedSmallInteger('age')->nullable();
+            $table->string('origin')->nullable();
+            $table->string('style')->nullable();
+            $table->date('acquired_date')->nullable();
+            $table->string('water_level')->nullable();
+            $table->string('location')->nullable();
+            $table->string('substrate')->nullable();
+            $table->string('fertilizer')->nullable();
+            $table->string('main_image')->nullable();
+            $table->text('description')->nullable();
+            $table->timestamps();
+        });
+    }
+
+    /**
+     * Reverse the migrations.
+     */
+    public function down(): void
+    {
+        Schema::dropIfExists('bonsais');
+    }
+};
